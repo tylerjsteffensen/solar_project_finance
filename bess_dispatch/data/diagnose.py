@@ -166,7 +166,7 @@ def _decode_xml_error(text: str) -> str:
     return text.strip().replace("\n", " ")[:120]
 
 
-def run(date: str = "20230117") -> None:
+def run(date: str = "20250617") -> None:
     """Probe the triangulation matrix for a date and print results + URLs.
 
     Args:
@@ -227,7 +227,7 @@ def sweep() -> None:
 def main() -> None:
     """CLI entry point for the diagnostic."""
     parser = argparse.ArgumentParser(description="Diagnose CAISO OASIS LMP queries.")
-    parser.add_argument("--date", default="20230117",
+    parser.add_argument("--date", default="20250617",
                         help="Trade date YYYYMMDD to test (default: %(default)s)")
     parser.add_argument("--sweep", action="store_true",
                         help="Sweep past dates to find the data-retention boundary")

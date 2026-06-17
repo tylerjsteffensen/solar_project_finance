@@ -26,7 +26,8 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # --------------------------------------------------------------------------- #
 # Analysis horizon
 # --------------------------------------------------------------------------- #
-DATA_YEAR = 2023          # Calendar year of CAISO LMP data to analyze
+DATA_YEAR = 2025          # Calendar year of CAISO LMP data to analyze
+                          # (most recent COMPLETE year; OASIS serves it in full)
 PROJECT_YEAR = 1          # Project year to model (degradation reference)
 
 # --------------------------------------------------------------------------- #
@@ -83,7 +84,7 @@ CAISO_BASE_URL = "https://oasis.caiso.com/oasisapi/SingleZip"
 CAISO_QUERYNAME = "PRC_LMP"
 CAISO_MARKET_RUN_ID = "DAM"          # Day-ahead market (hourly LMP)
 CAISO_NODE = "TH_SP15_GEN-APND"      # SP15 generation trading hub APnode
-CAISO_VERSION = 12
+CAISO_VERSION = 1                    # confirmed working via diagnostic sweep
 CAISO_RESULTFORMAT = 6           # 6 = CSV (zipped)
 CAISO_CHUNK_DAYS = 31            # Max date span per OASIS request
 CAISO_MAX_RETRIES = 4

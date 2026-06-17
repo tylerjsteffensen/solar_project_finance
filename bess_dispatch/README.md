@@ -79,11 +79,11 @@ cache:
    `.zip` — save it into that folder, no need to unzip). Change only the two
    dates to march through the year in ≤31-day chunks:
    ```
-   https://oasis.caiso.com/oasisapi/SingleZip?resultformat=6&queryname=PRC_LMP&version=12&market_run_id=DAM&node=TH_SP15_GEN-APND&startdatetime=20230101T08:00-0000&enddatetime=20230201T08:00-0000
+   https://oasis.caiso.com/oasisapi/SingleZip?resultformat=6&queryname=PRC_LMP&version=1&market_run_id=DAM&node=TH_SP15_GEN-APND&startdatetime=20250101T08:00-0000&enddatetime=20250201T08:00-0000
    ```
 3. Convert the downloads into the dashboard's cache:
    ```
-   python -m bess_dispatch.data.ingest_manual --year 2023
+   python -m bess_dispatch.data.ingest_manual --year 2025
    ```
    (accepts `.zip` or `.csv`; add `--src "C:\path"` if files are elsewhere).
 4. Launch the dashboard — the banner now confirms real CAISO data.
