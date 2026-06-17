@@ -282,7 +282,11 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Controls")
-        year = st.number_input("Data year", min_value=2019, max_value=2024,
+        # Upper bound is the current year so the configured DATA_YEAR is always
+        # selectable (OASIS only serves complete years up to last year, but the
+        # synthetic fallback covers any year).
+        _max_year = max(config.DATA_YEAR, pd.Timestamp.today().year)
+        year = st.number_input("Data year", min_value=2019, max_value=_max_year,
                                value=config.DATA_YEAR, step=1)
         force_refresh = st.checkbox("Force re-fetch from OASIS", value=False)
         st.markdown("---")
