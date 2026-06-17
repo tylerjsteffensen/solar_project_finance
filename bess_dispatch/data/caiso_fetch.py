@@ -210,8 +210,22 @@ def _parse_oasis_zip(content: bytes) -> pd.DataFrame:
         name = zf.namelist()[0]
         csv_bytes = zf.read(name)
     df = pd.read_csv(io.BytesIO(csv_bytes))
+    return rows_from_oasis_csv(df)
 
-    # OASIS column names vary slightly by report; resolve defensively.
+
+def rows_from_oasis_csv(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize a raw OASIS PRC_LMP CSV (already read) to interval/price rows.
+
+    Resolves the (slightly variable) OASIS column names, keeps only the total
+    LMP item, and returns tidy rows. Shared by the live fetcher and the manual
+    ingest path so both interpret OASIS files identically.
+
+    Args:
+        df: A DataFrame read directly from an OASIS PRC_LMP CSV.
+
+    Returns:
+        DataFrame with ``interval_start`` (tz-aware UTC) and ``lmp`` (float).
+    """
     item_col = _first_present(df, ["LMP_TYPE", "XML_DATA_ITEM", "DATA_ITEM"])
     if item_col is not None:
         df = df[df[item_col].astype(str).str.contains("LMP_PRC|LMP$", regex=True)]
@@ -219,6 +233,11 @@ def _parse_oasis_zip(content: bytes) -> pd.DataFrame:
         df, ["INTERVALSTARTTIME_GMT", "INTERVAL_START_GMT", "OPR_DT"]
     )
     value_col = _first_present(df, ["MW", "VALUE", "PRC"])
+    if start_col is None or value_col is None:
+        raise ValueError(
+            "Could not find OASIS time/value columns in CSV. "
+            f"Columns present: {list(df.columns)}"
+        )
     out = pd.DataFrame(
         {
             "interval_start": pd.to_datetime(df[start_col], utc=True, errors="coerce"),
@@ -251,7 +270,15 @@ def _resample_to_hourly(raw: pd.DataFrame, year: int) -> pd.DataFrame:
         DataFrame indexed by tz-naive hourly ``timestamp`` with column ``lmp``.
     """
     s = raw.set_index("interval_start")["lmp"].sort_index()
-    s = s.tz_convert("US/Pacific").tz_localize(None)
+    try:
+        # Preferred: true US/Pacific local clock (handles PST/PDT correctly).
+        s = s.tz_convert("US/Pacific").tz_localize(None)
+    except Exception:  # noqa: BLE001 - missing IANA tz database (e.g. Windows w/o tzdata)
+        # Fallback: fixed PST (UTC-8) offset. Avoids a hard dependency on the
+        # tz database; DST is ignored, which can shift summer hours by 1h.
+        print("[caiso_fetch] tz database unavailable; using fixed UTC-8 (PST). "
+              "Install 'tzdata' for exact DST handling.")
+        s.index = (s.index + pd.Timedelta(hours=-8)).tz_localize(None)
     hourly = s.resample("1h").mean()
 
     full_index = pd.date_range(
