@@ -1,12 +1,16 @@
 """
-CAISO OASIS API client for SP15 real-time LMP data.
+CAISO OASIS API client for SP15 LMP data.
 
-Pulls PRC_LMP (real-time market) prices for the SP15 generation node, in
-31-day chunks (the OASIS per-request limit), with exponential-backoff retries
-and on-disk caching so repeat runs never re-hit the API.
+Pulls PRC_LMP day-ahead-market (DAM) prices for the SP15 generation trading hub
+(``TH_SP15_GEN-APND``), in 31-day chunks (the OASIS per-request limit), with
+exponential-backoff retries and on-disk caching so repeat runs never re-hit the
+API. The report/market/node are all configurable in ``config.py`` (e.g. to
+switch to 5-minute real-time via PRC_INTVL_LMP / RTM).
 
-The raw real-time market is 5-minute granularity; this module resamples to a
-clean hourly series indexed by local-clock hour for the requested year.
+DAM LMP is natively hourly; this module still routes it through a resample +
+full-year reindex so any gaps are filled and the output is a clean,
+local-clock hourly series for the requested year (the same path also handles
+sub-hourly inputs if a real-time report is configured).
 
 Graceful degradation
 ---------------------

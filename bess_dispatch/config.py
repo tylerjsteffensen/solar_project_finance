@@ -67,11 +67,23 @@ DISCHARGE_PERCENTILE = 75     # Discharge when LMP >= rolling 75th percentile
 # --------------------------------------------------------------------------- #
 # CAISO OASIS API
 # --------------------------------------------------------------------------- #
-CAISO_BASE_URL = "http://oasis.caiso.com/oasisapi/SingleZip"
+# NOTE on report choice: PRC_LMP serves the *Day-Ahead Market* (DAM), which is
+# natively hourly, allows 31-day request chunks, and is what the OASIS website's
+# LMP Prices page exposes. This is the practical, default basis for the model.
+#
+# True real-time 5-minute LMP is a *different* report, PRC_INTVL_LMP with
+# market_run_id=RTM. It is intentionally NOT the default: OASIS caps 5-minute
+# queries at ~1 trade day per request (~100k rows/month), which is impractical
+# to download manually for a full year. To use it anyway, set:
+#     CAISO_QUERYNAME    = "PRC_INTVL_LMP"
+#     CAISO_MARKET_RUN_ID = "RTM"
+#     CAISO_VERSION       = 3
+#     CAISO_CHUNK_DAYS    = 1
+CAISO_BASE_URL = "https://oasis.caiso.com/oasisapi/SingleZip"
 CAISO_QUERYNAME = "PRC_LMP"
-CAISO_MARKET_RUN_ID = "RTM"      # Real-time market
-CAISO_NODE = "SP15GEN-APND"      # SP15 generation aggregate node
-CAISO_VERSION = 1
+CAISO_MARKET_RUN_ID = "DAM"          # Day-ahead market (hourly LMP)
+CAISO_NODE = "TH_SP15_GEN-APND"      # SP15 generation trading hub APnode
+CAISO_VERSION = 12
 CAISO_RESULTFORMAT = 6           # 6 = CSV (zipped)
 CAISO_CHUNK_DAYS = 31            # Max date span per OASIS request
 CAISO_MAX_RETRIES = 4
