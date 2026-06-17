@@ -42,48 +42,79 @@ from .caiso_fetch import oasis_url, rows_from_oasis_csv
 # otherwise). Space probes out by at least this many seconds.
 INTER_REQUEST_DELAY = 7
 
-# Candidate parameter sets to probe, most-likely first. Each is
-# (queryname, market_run_id, version, node). We vary BOTH the version (1 vs 12)
-# and the node, and include DLAP_SCE-APND -- a major, definitely-populated load
-# aggregation node -- as a reference: if DLAP works at some version, that
-# version is correct and any remaining failures are node-name problems.
-CANDIDATES = [
-    ("PRC_LMP", "DAM", 1, "TH_SP15_GEN-APND"),    # SP15 hub, older version
-    ("PRC_LMP", "DAM", 12, "TH_SP15_GEN-APND"),   # SP15 hub, current version
-    ("PRC_LMP", "DAM", 1, "DLAP_SCE-APND"),       # reference node, version 1
-    ("PRC_LMP", "DAM", 12, "DLAP_SCE-APND"),      # reference node, version 12
-    ("PRC_LMP", "DAM", 1, "SP15_GEN-APND"),       # alt hub spelling (no TH_)
-    ("PRC_LMP", "DAM", 12, "SP15_GEN-APND"),
-]
 
-
-def _probe(
-    queryname: str, market: str, version: int, node: str, date: str
-) -> str:
-    """Send one minimal one-day OASIS request and summarize the outcome.
+def _window(date: str, hour: int = 8, days: int = 1) -> tuple[str, str]:
+    """Build (startdatetime, enddatetime) GMT strings for a date window.
 
     Args:
-        queryname: OASIS report name.
-        market: market_run_id (DAM / RTM).
-        version: report version number.
-        node: APnode id.
-        date: Start date as YYYYMMDD (one trade day is requested).
+        date: Start date YYYYMMDD.
+        hour: GMT hour offset for the day boundary (8 = midnight PST, 7 = PDT).
+        days: Window length in days.
 
     Returns:
-        A human-readable result string (data summary or decoded OASIS error).
+        Tuple of OASIS-formatted start/end datetime strings.
     """
-    start = f"{date}T08:00-0000"
-    end_dt = pd.to_datetime(date) + pd.Timedelta(days=1)
-    end = f"{end_dt:%Y%m%d}T08:00-0000"
-    params = {
-        "queryname": queryname,
-        "market_run_id": market,
-        "version": version,
-        "node": node,
-        "resultformat": config.CAISO_RESULTFORMAT,
-        "startdatetime": start,
-        "enddatetime": end,
-    }
+    start_dt = pd.to_datetime(date)
+    end_dt = start_dt + pd.Timedelta(days=days)
+    return (f"{start_dt:%Y%m%d}T{hour:02d}:00-0000",
+            f"{end_dt:%Y%m%d}T{hour:02d}:00-0000")
+
+
+def _build_probes(date: str) -> list[tuple[str, dict]]:
+    """Construct the labelled probe matrix for a given date.
+
+    The matrix is designed to triangulate the failure: it holds the
+    known-populated DLAP_SCE-APND node and varies version, the day-boundary
+    offset (08 vs 07 GMT), and the window length; it includes a
+    ``grp_type=ALL_APNODES`` probe (no node at all) which, if it returns data,
+    proves the report/date/format/version are correct and isolates the problem
+    to the node id.
+
+    Args:
+        date: Trade date YYYYMMDD.
+
+    Returns:
+        List of (label, params) pairs.
+    """
+    recent = (pd.Timestamp.today().normalize() - pd.Timedelta(days=10)).strftime("%Y%m%d")
+    base = {"queryname": "PRC_LMP", "market_run_id": "DAM",
+            "resultformat": config.CAISO_RESULTFORMAT}
+
+    def p(**kw):
+        d = dict(base)
+        d.update(kw)
+        return d
+
+    s08, e08 = _window(date, hour=8)
+    s07, e07 = _window(date, hour=7)
+    s2, e2 = _window(date, hour=8, days=2)
+    sr, er = _window(recent, hour=8)
+
+    return [
+        ("DLAP v1  T08 1d",
+         p(version=1, node="DLAP_SCE-APND", startdatetime=s08, enddatetime=e08)),
+        ("DLAP v1  T07 1d",
+         p(version=1, node="DLAP_SCE-APND", startdatetime=s07, enddatetime=e07)),
+        ("DLAP v1  T08 2d",
+         p(version=1, node="DLAP_SCE-APND", startdatetime=s2, enddatetime=e2)),
+        ("DLAP v1  recent",
+         p(version=1, node="DLAP_SCE-APND", startdatetime=sr, enddatetime=er)),
+        ("ALLNODES v1 T08",  # no node -> proves report/date/format if it works
+         p(version=1, grp_type="ALL_APNODES", startdatetime=s08, enddatetime=e08)),
+        ("SP15hub v1 T08",
+         p(version=1, node="TH_SP15_GEN-APND", startdatetime=s08, enddatetime=e08)),
+    ]
+
+
+def _probe(params: dict) -> tuple[str, str]:
+    """Send one OASIS request and summarize the outcome.
+
+    Args:
+        params: Full query parameters for the SingleZip endpoint.
+
+    Returns:
+        Tuple of (request_url, human-readable result string).
+    """
     url = oasis_url(params)  # preserve ':' in datetimes (see oasis_url docstring)
     resp = None
     for attempt in range(2):  # one retry if rate-limited (HTTP 429)
@@ -94,7 +125,7 @@ def _probe(
                 headers={"User-Agent": "bess-dispatch-research/1.0"},
             )
         except Exception as exc:  # noqa: BLE001
-            return f"REQUEST FAILED: {type(exc).__name__}: {exc}"
+            return url, f"REQUEST FAILED: {type(exc).__name__}: {exc}"
         if resp.status_code == 429 and attempt == 0:
             time.sleep(INTER_REQUEST_DELAY)
             continue
@@ -106,19 +137,17 @@ def _probe(
             with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
                 name = zf.namelist()[0]
                 body = zf.read(name)
-            # An XML error can be returned inside the zip too.
-            if body.lstrip().startswith(b"<"):
-                return _decode_xml_error(body.decode("utf-8", "ignore"))
+            if body.lstrip().startswith(b"<"):  # XML error inside the zip
+                return url, _decode_xml_error(body.decode("utf-8", "ignore"))
             rows = rows_from_oasis_csv(pd.read_csv(io.BytesIO(body)))
             if rows.empty:
-                return "OK transport but 0 LMP rows parsed (check LMP_TYPE column)"
-            return f"OK: {len(rows)} rows, mean ${rows['lmp'].mean():.2f}/MWh"
+                return url, "OK transport but 0 LMP rows parsed (check LMP_TYPE)"
+            return url, f"OK: {len(rows)} rows, mean ${rows['lmp'].mean():.2f}/MWh"
         except Exception as exc:  # noqa: BLE001
-            return f"unzip/parse error: {exc}"
+            return url, f"unzip/parse error: {exc}"
 
-    # Non-zip response: usually an XML/plain error.
     text = resp.content.decode("utf-8", "ignore")
-    return f"HTTP {resp.status_code} {ctype}: {_decode_xml_error(text)}"
+    return url, f"HTTP {resp.status_code} {ctype}: {_decode_xml_error(text)}"
 
 
 def _decode_xml_error(text: str) -> str:
@@ -138,24 +167,28 @@ def _decode_xml_error(text: str) -> str:
 
 
 def run(date: str = "20230117") -> None:
-    """Probe every candidate parameter set for one day and print a report.
+    """Probe the triangulation matrix for a date and print results + URLs.
 
     Args:
         date: Trade date to test, as YYYYMMDD.
     """
-    print(f"Probing CAISO OASIS for a single day ({date}). "
-          f"One row of output per candidate parameter set:\n")
-    header = f"{'queryname':<15} {'mkt':<4} {'ver':<4} {'node':<22} -> result"
-    print(header)
-    print("-" * len(header))
-    for i, (qn, mkt, ver, node) in enumerate(CANDIDATES):
+    probes = _build_probes(date)
+    print(f"Probing CAISO OASIS (base test date {date}). Each probe prints its "
+          f"exact request URL so you can also paste it into a browser:\n")
+    for i, (label, params) in enumerate(probes):
         if i:  # space requests out to respect CAISO's Acceptable Use Policy
             time.sleep(INTER_REQUEST_DELAY)
-        result = _probe(qn, mkt, ver, node, date)
-        print(f"{qn:<15} {mkt:<4} {ver:<4} {node:<22} -> {result}", flush=True)
+        url, result = _probe(params)
+        print(f"[{label}] -> {result}")
+        print(f"    {url}\n", flush=True)
     print(
-        "\nUse the first combination that says 'OK': copy its queryname, "
-        "market, version, and node into the CAISO_* settings in config.py."
+        "Read it like this:\n"
+        "  * If 'ALLNODES' returns OK but the node probes do not -> the node\n"
+        "    IDs are the problem (report/date/format/version are all correct).\n"
+        "  * If a 'DLAP' probe returns OK -> copy that probe's exact params\n"
+        "    (version, offset, window) into config.py.\n"
+        "  * If everything still fails -> paste one printed URL into a browser\n"
+        "    and share the raw response so we can see what OASIS objects to."
     )
 
 
