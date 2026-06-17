@@ -89,6 +89,7 @@ CAISO_CHUNK_DAYS = 31            # Max date span per OASIS request
 CAISO_MAX_RETRIES = 4
 CAISO_BACKOFF_BASE_SEC = 5       # Exponential backoff base (OASIS rate-limits hard)
 CAISO_REQUEST_TIMEOUT = 60       # Seconds
+CAISO_INTER_REQUEST_DELAY = 7    # Seconds between live chunk requests (AUP: >=5s)
 
 # If the OASIS API is unreachable (firewall, 403 throttle, offline), the fetcher
 # falls back to a deterministic synthetic SP15 price series so the rest of the

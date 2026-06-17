@@ -115,11 +115,21 @@ def _fetch_year_from_oasis(year: int, *, force_refresh: bool = False) -> pd.Data
     failure of any chunk (caller decides whether to fall back).
     """
     frames = []
-    for start, end in _chunk_ranges(year):
+    for i, (start, end) in enumerate(_chunk_ranges(year)):
+        # Space live requests out to respect CAISO's Acceptable Use Policy
+        # (rapid back-to-back calls return HTTP 429). Cache hits skip the wait.
+        if i and not _chunk_is_cached(start, end):
+            time.sleep(config.CAISO_INTER_REQUEST_DELAY)
         frames.append(_fetch_chunk(start, end, force_refresh=force_refresh))
     raw = pd.concat(frames, ignore_index=True)
     raw = raw.drop_duplicates(subset="interval_start").sort_values("interval_start")
     return raw
+
+
+def _chunk_is_cached(start: datetime, end: datetime) -> bool:
+    """Whether a chunk's CSV cache already exists (so no live request is needed)."""
+    tag = f"{start:%Y%m%d}_{end:%Y%m%d}"
+    return os.path.exists(os.path.join(config.CACHE_DIR, f"sp15_lmp_raw_{tag}.csv"))
 
 
 def _fetch_chunk(

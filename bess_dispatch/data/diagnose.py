@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import io
 import re
+import time
 import zipfile
 
 import pandas as pd
@@ -37,14 +38,22 @@ import requests
 from .. import config
 from .caiso_fetch import rows_from_oasis_csv
 
+# CAISO's Acceptable Use Policy requires a gap between requests (HTTP 429
+# otherwise). Space probes out by at least this many seconds.
+INTER_REQUEST_DELAY = 7
+
 # Candidate parameter sets to probe, most-likely first. Each is
-# (queryname, market_run_id, version, node).
+# (queryname, market_run_id, version, node). We vary BOTH the version (1 vs 12)
+# and the node, and include DLAP_SCE-APND -- a major, definitely-populated load
+# aggregation node -- as a reference: if DLAP works at some version, that
+# version is correct and any remaining failures are node-name problems.
 CANDIDATES = [
-    ("PRC_LMP", "DAM", 12, "TH_SP15_GEN-APND"),   # day-ahead hub, current convention
-    ("PRC_LMP", "DAM", 1, "TH_SP15_GEN-APND"),    # older version number
-    ("PRC_LMP", "DAM", 12, "DLAP_SCE-APND"),      # SCE load aggregation point (sanity node)
-    ("PRC_LMP", "DAM", 12, "SP15_GEN-APND"),      # alternate hub spelling (no TH_ prefix)
-    ("PRC_INTVL_LMP", "RTM", 3, "TH_SP15_GEN-APND"),  # 5-min real-time hub
+    ("PRC_LMP", "DAM", 1, "TH_SP15_GEN-APND"),    # SP15 hub, older version
+    ("PRC_LMP", "DAM", 12, "TH_SP15_GEN-APND"),   # SP15 hub, current version
+    ("PRC_LMP", "DAM", 1, "DLAP_SCE-APND"),       # reference node, version 1
+    ("PRC_LMP", "DAM", 12, "DLAP_SCE-APND"),      # reference node, version 12
+    ("PRC_LMP", "DAM", 1, "SP15_GEN-APND"),       # alt hub spelling (no TH_)
+    ("PRC_LMP", "DAM", 12, "SP15_GEN-APND"),
 ]
 
 
@@ -75,14 +84,20 @@ def _probe(
         "startdatetime": start,
         "enddatetime": end,
     }
-    try:
-        resp = requests.get(
-            config.CAISO_BASE_URL, params=params,
-            timeout=config.CAISO_REQUEST_TIMEOUT,
-            headers={"User-Agent": "bess-dispatch-research/1.0"},
-        )
-    except Exception as exc:  # noqa: BLE001
-        return f"REQUEST FAILED: {type(exc).__name__}: {exc}"
+    resp = None
+    for attempt in range(2):  # one retry if rate-limited (HTTP 429)
+        try:
+            resp = requests.get(
+                config.CAISO_BASE_URL, params=params,
+                timeout=config.CAISO_REQUEST_TIMEOUT,
+                headers={"User-Agent": "bess-dispatch-research/1.0"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            return f"REQUEST FAILED: {type(exc).__name__}: {exc}"
+        if resp.status_code == 429 and attempt == 0:
+            time.sleep(INTER_REQUEST_DELAY)
+            continue
+        break
 
     ctype = resp.headers.get("Content-Type", "")
     if resp.status_code == 200 and "zip" in ctype.lower():
@@ -132,9 +147,11 @@ def run(date: str = "20230117") -> None:
     header = f"{'queryname':<15} {'mkt':<4} {'ver':<4} {'node':<22} -> result"
     print(header)
     print("-" * len(header))
-    for qn, mkt, ver, node in CANDIDATES:
+    for i, (qn, mkt, ver, node) in enumerate(CANDIDATES):
+        if i:  # space requests out to respect CAISO's Acceptable Use Policy
+            time.sleep(INTER_REQUEST_DELAY)
         result = _probe(qn, mkt, ver, node, date)
-        print(f"{qn:<15} {mkt:<4} {ver:<4} {node:<22} -> {result}")
+        print(f"{qn:<15} {mkt:<4} {ver:<4} {node:<22} -> {result}", flush=True)
     print(
         "\nUse the first combination that says 'OK': copy its queryname, "
         "market, version, and node into the CAISO_* settings in config.py."
