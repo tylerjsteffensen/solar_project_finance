@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import time
 import zipfile
 from datetime import datetime, timedelta
@@ -247,8 +248,32 @@ def _parse_oasis_zip(content: bytes) -> pd.DataFrame:
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         name = zf.namelist()[0]
         csv_bytes = zf.read(name)
+    # When a query is invalid (e.g. date range too long), OASIS returns a zip
+    # containing an XML error document rather than a CSV. Detect that and raise
+    # the decoded message instead of a confusing "missing columns" error.
+    if csv_bytes.lstrip().startswith(b"<"):
+        raise RuntimeError(
+            f"OASIS returned an error instead of data: "
+            f"{decode_oasis_error(csv_bytes.decode('utf-8', 'ignore'))}"
+        )
     df = pd.read_csv(io.BytesIO(csv_bytes))
     return rows_from_oasis_csv(df)
+
+
+def decode_oasis_error(text: str) -> str:
+    """Extract ``ERR_CODE``/``ERR_DESC`` from an OASIS XML error payload.
+
+    Args:
+        text: Decoded response body.
+
+    Returns:
+        ``ERR <code>: <desc>`` if present, else a trimmed snippet of the body.
+    """
+    code = re.search(r"ERR_CODE>([^<]+)<", text)
+    desc = re.search(r"ERR_DESC>([^<]+)<", text)
+    if code or desc:
+        return f"ERR {code.group(1) if code else '?'}: {desc.group(1) if desc else '?'}"
+    return text.strip().replace("\n", " ")[:160]
 
 
 def rows_from_oasis_csv(df: pd.DataFrame) -> pd.DataFrame:

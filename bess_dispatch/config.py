@@ -86,7 +86,8 @@ CAISO_MARKET_RUN_ID = "DAM"          # Day-ahead market (hourly LMP)
 CAISO_NODE = "TH_SP15_GEN-APND"      # SP15 generation trading hub APnode
 CAISO_VERSION = 1                    # confirmed working via diagnostic sweep
 CAISO_RESULTFORMAT = 6           # 6 = CSV (zipped)
-CAISO_CHUNK_DAYS = 31            # Max date span per OASIS request
+CAISO_CHUNK_DAYS = 30            # Date span per request; OASIS caps PRC_LMP at
+                                 # 31 days, so 30 stays safely under the boundary
 CAISO_MAX_RETRIES = 4
 CAISO_BACKOFF_BASE_SEC = 5       # Exponential backoff base (OASIS rate-limits hard)
 CAISO_REQUEST_TIMEOUT = 60       # Seconds
