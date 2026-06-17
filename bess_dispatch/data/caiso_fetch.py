@@ -31,12 +31,32 @@ import os
 import time
 import zipfile
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 import numpy as np
 import pandas as pd
 import requests
 
 from .. import config
+
+
+def oasis_url(params: dict) -> str:
+    """Build a full OASIS SingleZip URL with the datetime colons preserved.
+
+    CAISO's ``startdatetime``/``enddatetime`` use an ISO time like
+    ``20230117T08:00-0000``. If the params are handed to ``requests`` directly,
+    it percent-encodes the ``:`` to ``%3A``; OASIS does not decode that and
+    responds ``ERR_CODE 1000 "No data returned"`` for every query. We therefore
+    construct the query string ourselves, marking ``:`` and ``-`` as safe, and
+    pass the finished URL to ``requests`` (which leaves a pre-built URL alone).
+
+    Args:
+        params: Query parameters for the SingleZip endpoint.
+
+    Returns:
+        A fully-formed request URL.
+    """
+    return f"{config.CAISO_BASE_URL}?{urlencode(params, safe=':-')}"
 
 
 # --------------------------------------------------------------------------- #
@@ -181,12 +201,16 @@ def _request_with_retries(params: dict, tag: str) -> bytes:
     Raises:
         RuntimeError: If all retry attempts are exhausted.
     """
+    # IMPORTANT: build the URL ourselves so the ':' in the datetimes survives.
+    # If we hand `params` to requests it percent-encodes ':' -> '%3A', which
+    # OASIS does not decode -> it sees a malformed datetime and returns
+    # ERR_CODE 1000 "No data returned" for every query. See oasis_url().
+    url = oasis_url(params)
     last_err: Exception | None = None
     for attempt in range(config.CAISO_MAX_RETRIES):
         try:
             resp = requests.get(
-                config.CAISO_BASE_URL,
-                params=params,
+                url,
                 timeout=config.CAISO_REQUEST_TIMEOUT,
                 headers={"User-Agent": "bess-dispatch-research/1.0"},
             )

@@ -36,7 +36,7 @@ import pandas as pd
 import requests
 
 from .. import config
-from .caiso_fetch import rows_from_oasis_csv
+from .caiso_fetch import oasis_url, rows_from_oasis_csv
 
 # CAISO's Acceptable Use Policy requires a gap between requests (HTTP 429
 # otherwise). Space probes out by at least this many seconds.
@@ -84,11 +84,12 @@ def _probe(
         "startdatetime": start,
         "enddatetime": end,
     }
+    url = oasis_url(params)  # preserve ':' in datetimes (see oasis_url docstring)
     resp = None
     for attempt in range(2):  # one retry if rate-limited (HTTP 429)
         try:
             resp = requests.get(
-                config.CAISO_BASE_URL, params=params,
+                url,
                 timeout=config.CAISO_REQUEST_TIMEOUT,
                 headers={"User-Agent": "bess-dispatch-research/1.0"},
             )
