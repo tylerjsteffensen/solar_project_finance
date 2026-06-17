@@ -192,13 +192,50 @@ def run(date: str = "20230117") -> None:
     )
 
 
+def sweep() -> None:
+    """Probe a series of past dates to find how far back OASIS serves data.
+
+    Holds the known-good parameters (PRC_LMP / DAM / version 1 / DLAP_SCE-APND)
+    and varies only the date, from very recent back through several years, to
+    map the SingleZip historical-retention boundary. Use the result to choose
+    ``config.DATA_YEAR`` (the most recent fully-available calendar year).
+    """
+    today = pd.Timestamp.today().normalize()
+    dates = [
+        (today - pd.Timedelta(days=7)).strftime("%Y%m%d"),
+        (today - pd.Timedelta(days=60)).strftime("%Y%m%d"),
+        (today - pd.Timedelta(days=180)).strftime("%Y%m%d"),
+        (today - pd.Timedelta(days=365)).strftime("%Y%m%d"),
+        "20251215", "20250615", "20250115",
+        "20240615", "20230615",
+    ]
+    base = {"queryname": "PRC_LMP", "market_run_id": "DAM", "version": 1,
+            "node": "DLAP_SCE-APND", "resultformat": config.CAISO_RESULTFORMAT}
+    print("Date-retention sweep (PRC_LMP/DAM/v1/DLAP_SCE-APND, 1 day each):\n")
+    for i, date in enumerate(dates):
+        if i:
+            time.sleep(INTER_REQUEST_DELAY)
+        s, e = _window(date, hour=8)
+        _, result = _probe({**base, "startdatetime": s, "enddatetime": e})
+        print(f"  {date}  -> {result}", flush=True)
+    print(
+        "\nPick the most recent calendar YEAR whose dates all return OK and set\n"
+        "DATA_YEAR to it in config.py (the fetcher will pull that whole year)."
+    )
+
+
 def main() -> None:
     """CLI entry point for the diagnostic."""
     parser = argparse.ArgumentParser(description="Diagnose CAISO OASIS LMP queries.")
     parser.add_argument("--date", default="20230117",
                         help="Trade date YYYYMMDD to test (default: %(default)s)")
+    parser.add_argument("--sweep", action="store_true",
+                        help="Sweep past dates to find the data-retention boundary")
     args = parser.parse_args()
-    run(args.date)
+    if args.sweep:
+        sweep()
+    else:
+        run(args.date)
 
 
 if __name__ == "__main__":
