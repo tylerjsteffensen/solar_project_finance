@@ -62,8 +62,8 @@ RA_PEAK_HOURS = (16, 17, 18, 19, 20, 21)  # ... during these hours-ending (HE16-
 # Greedy dispatch signal
 # --------------------------------------------------------------------------- #
 ROLLING_WINDOW_DAYS = 30      # Trailing window for percentile price signal
-CHARGE_PERCENTILE = 25        # Charge when LMP <= rolling 25th percentile
-DISCHARGE_PERCENTILE = 75     # Discharge when LMP >= rolling 75th percentile
+CHARGE_PERCENTILE = 35        # Charge when LMP <= rolling 35th percentile
+DISCHARGE_PERCENTILE = 65     # Discharge when LMP >= rolling 65th percentile
 
 # --------------------------------------------------------------------------- #
 # CAISO OASIS API

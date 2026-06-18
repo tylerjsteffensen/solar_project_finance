@@ -3,8 +3,8 @@ Greedy hourly BESS dispatch optimizer.
 
 A deliberately simple, transparent rule-based dispatcher (no LP/MIP):
 
-* Charge when the LMP is at/below the trailing 30-day 25th percentile.
-* Discharge when the LMP is at/above the trailing 30-day 75th percentile.
+* Charge when the LMP is at/below the trailing 30-day 35th percentile.
+* Discharge when the LMP is at/above the trailing 30-day 65th percentile.
 * Otherwise idle.
 
 State of charge is tracked hour by hour and clamped to the [10%, 95%] band.

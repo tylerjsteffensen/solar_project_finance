@@ -136,12 +136,12 @@ disp = run_dispatch(get_hourly_lmp(2023))
 A deliberately simple, fully transparent **greedy** rule-based dispatcher — no
 linear/mixed-integer programming. Each hour:
 
-1. **Price signal.** Compute the trailing **30-day rolling 25th and 75th
+1. **Price signal.** Compute the trailing **30-day rolling 35th and 65th
    percentile** of LMP (causal — no look-ahead).
-2. **Charge** when `LMP ≤ 25th percentile`, up to the lesser of the power
+2. **Charge** when `LMP ≤ 35th percentile`, up to the lesser of the power
    rating and the headroom to the 95% ceiling. Stored energy = grid energy ×
    RTE (the round-trip loss is booked entirely on the charge side).
-3. **Discharge** when `LMP ≥ 75th percentile`, up to the lesser of the power
+3. **Discharge** when `LMP ≥ 65th percentile`, up to the lesser of the power
    rating and the energy available above the 10% floor. Discharge is loss-free.
 4. **Otherwise idle.**
 5. **Resource Adequacy.** During hours-ending 16–21, 45 MW of power is reserved
@@ -163,7 +163,7 @@ table relative to a true optimization:
 |---|---|---|
 | Foresight | None — reacts to a trailing percentile signal | Perfect (or forecast) foresight over a horizon |
 | Cycle timing | May charge/discharge sub-optimally near thresholds | Globally optimal charge/discharge scheduling |
-| Threshold choice | Fixed 25th/75th percentiles | Endogenous — dispatches whenever marginal spread > marginal cost |
+| Threshold choice | Fixed 35th/65th percentiles | Endogenous — dispatches whenever marginal spread > marginal cost |
 | Degradation cost | Not priced into the decision | Can co-optimize throughput vs. degradation |
 | Multi-service | Arbitrage only; RA handled as a hard reserve | Can co-optimize energy + AS + RA capacity |
 | Typical result | **Captures wider spreads but fewer cycles** | More cycles at slightly thinner average spread, higher total $ |
