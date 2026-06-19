@@ -1,12 +1,16 @@
 """
-CAISO OASIS API client for SP15 real-time LMP data.
+CAISO OASIS API client for SP15 LMP data.
 
-Pulls PRC_LMP (real-time market) prices for the SP15 generation node, in
-31-day chunks (the OASIS per-request limit), with exponential-backoff retries
-and on-disk caching so repeat runs never re-hit the API.
+Pulls PRC_LMP day-ahead-market (DAM) prices for the SP15 generation trading hub
+(``TH_SP15_GEN-APND``), in 31-day chunks (the OASIS per-request limit), with
+exponential-backoff retries and on-disk caching so repeat runs never re-hit the
+API. The report/market/node are all configurable in ``config.py`` (e.g. to
+switch to 5-minute real-time via PRC_INTVL_LMP / RTM).
 
-The raw real-time market is 5-minute granularity; this module resamples to a
-clean hourly series indexed by local-clock hour for the requested year.
+DAM LMP is natively hourly; this module still routes it through a resample +
+full-year reindex so any gaps are filled and the output is a clean,
+local-clock hourly series for the requested year (the same path also handles
+sub-hourly inputs if a real-time report is configured).
 
 Graceful degradation
 ---------------------
@@ -24,15 +28,36 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import time
 import zipfile
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 import numpy as np
 import pandas as pd
 import requests
 
 from .. import config
+
+
+def oasis_url(params: dict) -> str:
+    """Build a full OASIS SingleZip URL with the datetime colons preserved.
+
+    CAISO's ``startdatetime``/``enddatetime`` use an ISO time like
+    ``20230117T08:00-0000``. If the params are handed to ``requests`` directly,
+    it percent-encodes the ``:`` to ``%3A``; OASIS does not decode that and
+    responds ``ERR_CODE 1000 "No data returned"`` for every query. We therefore
+    construct the query string ourselves, marking ``:`` and ``-`` as safe, and
+    pass the finished URL to ``requests`` (which leaves a pre-built URL alone).
+
+    Args:
+        params: Query parameters for the SingleZip endpoint.
+
+    Returns:
+        A fully-formed request URL.
+    """
+    return f"{config.CAISO_BASE_URL}?{urlencode(params, safe=':-')}"
 
 
 # --------------------------------------------------------------------------- #
@@ -111,11 +136,21 @@ def _fetch_year_from_oasis(year: int, *, force_refresh: bool = False) -> pd.Data
     failure of any chunk (caller decides whether to fall back).
     """
     frames = []
-    for start, end in _chunk_ranges(year):
+    for i, (start, end) in enumerate(_chunk_ranges(year)):
+        # Space live requests out to respect CAISO's Acceptable Use Policy
+        # (rapid back-to-back calls return HTTP 429). Cache hits skip the wait.
+        if i and not _chunk_is_cached(start, end):
+            time.sleep(config.CAISO_INTER_REQUEST_DELAY)
         frames.append(_fetch_chunk(start, end, force_refresh=force_refresh))
     raw = pd.concat(frames, ignore_index=True)
     raw = raw.drop_duplicates(subset="interval_start").sort_values("interval_start")
     return raw
+
+
+def _chunk_is_cached(start: datetime, end: datetime) -> bool:
+    """Whether a chunk's CSV cache already exists (so no live request is needed)."""
+    tag = f"{start:%Y%m%d}_{end:%Y%m%d}"
+    return os.path.exists(os.path.join(config.CACHE_DIR, f"sp15_lmp_raw_{tag}.csv"))
 
 
 def _fetch_chunk(
@@ -167,12 +202,16 @@ def _request_with_retries(params: dict, tag: str) -> bytes:
     Raises:
         RuntimeError: If all retry attempts are exhausted.
     """
+    # IMPORTANT: build the URL ourselves so the ':' in the datetimes survives.
+    # If we hand `params` to requests it percent-encodes ':' -> '%3A', which
+    # OASIS does not decode -> it sees a malformed datetime and returns
+    # ERR_CODE 1000 "No data returned" for every query. See oasis_url().
+    url = oasis_url(params)
     last_err: Exception | None = None
     for attempt in range(config.CAISO_MAX_RETRIES):
         try:
             resp = requests.get(
-                config.CAISO_BASE_URL,
-                params=params,
+                url,
                 timeout=config.CAISO_REQUEST_TIMEOUT,
                 headers={"User-Agent": "bess-dispatch-research/1.0"},
             )
@@ -209,9 +248,47 @@ def _parse_oasis_zip(content: bytes) -> pd.DataFrame:
     with zipfile.ZipFile(io.BytesIO(content)) as zf:
         name = zf.namelist()[0]
         csv_bytes = zf.read(name)
+    # When a query is invalid (e.g. date range too long), OASIS returns a zip
+    # containing an XML error document rather than a CSV. Detect that and raise
+    # the decoded message instead of a confusing "missing columns" error.
+    if csv_bytes.lstrip().startswith(b"<"):
+        raise RuntimeError(
+            f"OASIS returned an error instead of data: "
+            f"{decode_oasis_error(csv_bytes.decode('utf-8', 'ignore'))}"
+        )
     df = pd.read_csv(io.BytesIO(csv_bytes))
+    return rows_from_oasis_csv(df)
 
-    # OASIS column names vary slightly by report; resolve defensively.
+
+def decode_oasis_error(text: str) -> str:
+    """Extract ``ERR_CODE``/``ERR_DESC`` from an OASIS XML error payload.
+
+    Args:
+        text: Decoded response body.
+
+    Returns:
+        ``ERR <code>: <desc>`` if present, else a trimmed snippet of the body.
+    """
+    code = re.search(r"ERR_CODE>([^<]+)<", text)
+    desc = re.search(r"ERR_DESC>([^<]+)<", text)
+    if code or desc:
+        return f"ERR {code.group(1) if code else '?'}: {desc.group(1) if desc else '?'}"
+    return text.strip().replace("\n", " ")[:160]
+
+
+def rows_from_oasis_csv(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize a raw OASIS PRC_LMP CSV (already read) to interval/price rows.
+
+    Resolves the (slightly variable) OASIS column names, keeps only the total
+    LMP item, and returns tidy rows. Shared by the live fetcher and the manual
+    ingest path so both interpret OASIS files identically.
+
+    Args:
+        df: A DataFrame read directly from an OASIS PRC_LMP CSV.
+
+    Returns:
+        DataFrame with ``interval_start`` (tz-aware UTC) and ``lmp`` (float).
+    """
     item_col = _first_present(df, ["LMP_TYPE", "XML_DATA_ITEM", "DATA_ITEM"])
     if item_col is not None:
         df = df[df[item_col].astype(str).str.contains("LMP_PRC|LMP$", regex=True)]
@@ -219,6 +296,11 @@ def _parse_oasis_zip(content: bytes) -> pd.DataFrame:
         df, ["INTERVALSTARTTIME_GMT", "INTERVAL_START_GMT", "OPR_DT"]
     )
     value_col = _first_present(df, ["MW", "VALUE", "PRC"])
+    if start_col is None or value_col is None:
+        raise ValueError(
+            "Could not find OASIS time/value columns in CSV. "
+            f"Columns present: {list(df.columns)}"
+        )
     out = pd.DataFrame(
         {
             "interval_start": pd.to_datetime(df[start_col], utc=True, errors="coerce"),
@@ -251,7 +333,15 @@ def _resample_to_hourly(raw: pd.DataFrame, year: int) -> pd.DataFrame:
         DataFrame indexed by tz-naive hourly ``timestamp`` with column ``lmp``.
     """
     s = raw.set_index("interval_start")["lmp"].sort_index()
-    s = s.tz_convert("US/Pacific").tz_localize(None)
+    try:
+        # Preferred: true US/Pacific local clock (handles PST/PDT correctly).
+        s = s.tz_convert("US/Pacific").tz_localize(None)
+    except Exception:  # noqa: BLE001 - missing IANA tz database (e.g. Windows w/o tzdata)
+        # Fallback: fixed PST (UTC-8) offset. Avoids a hard dependency on the
+        # tz database; DST is ignored, which can shift summer hours by 1h.
+        print("[caiso_fetch] tz database unavailable; using fixed UTC-8 (PST). "
+              "Install 'tzdata' for exact DST handling.")
+        s.index = (s.index + pd.Timedelta(hours=-8)).tz_localize(None)
     hourly = s.resample("1h").mean()
 
     full_index = pd.date_range(

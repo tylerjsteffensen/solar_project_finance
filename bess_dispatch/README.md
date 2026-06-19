@@ -5,7 +5,7 @@ project in **CAISO SP15**, built to validate (and stress-test) the simplified
 annual BESS-revenue assumptions in the companion Excel project finance model
 (`Solar_Plus_Storage_PF_Model_POLISHED.xlsx`).
 
-It pulls real CAISO SP15 real-time LMP data, generates a synthetic solar
+It pulls real CAISO SP15 day-ahead LMP data, generates a synthetic solar
 profile, runs a transparent **greedy** dispatch against the price curve, and
 compares the resulting arbitrage revenue, captured spread, and cycle count
 against the Excel model's flat assumptions — all in an interactive Streamlit
@@ -25,7 +25,7 @@ dashboard.
 | Degradation | 2.5%/yr on power **and** energy |
 | Resource Adequacy | 45 MW held available for discharge, HE16–21 |
 | Location | CAISO SP15 (Southern California) |
-| Price node | `SP15GEN-APND`, real-time market (RTM) |
+| Price node | `TH_SP15_GEN-APND`, day-ahead market (DAM) |
 
 All monetary values are **nominal USD, Year 1 only** (no escalation), to match
 the Year-1 column of the Excel model.
@@ -64,6 +64,36 @@ realistic synthetic SP15 price series** (duck-curve shape, seasonal envelope,
 evening scarcity spikes) so the entire pipeline and dashboard remain runnable.
 The dashboard shows a clear banner when synthetic data is in use. Set
 `ALLOW_SYNTHETIC_LMP_FALLBACK = False` in `config.py` to hard-fail instead.
+
+### Loading real data manually (recommended when the API is throttled)
+
+OASIS throttles programmatic callers but serves downloads fine to a browser.
+Download the day-ahead LMP files yourself and let the ingest tool build the
+cache:
+
+1. Create a download folder:
+   ```
+   mkdir bess_dispatch/data/cache/manual_downloads
+   ```
+2. For each month, paste a URL like this into your browser (it downloads a
+   `.zip` — save it into that folder, no need to unzip). Change only the two
+   dates to march through the year in ≤31-day chunks:
+   ```
+   https://oasis.caiso.com/oasisapi/SingleZip?resultformat=6&queryname=PRC_LMP&version=1&market_run_id=DAM&node=TH_SP15_GEN-APND&startdatetime=20250101T08:00-0000&enddatetime=20250201T08:00-0000
+   ```
+3. Convert the downloads into the dashboard's cache:
+   ```
+   python -m bess_dispatch.data.ingest_manual --year 2025
+   ```
+   (accepts `.zip` or `.csv`; add `--src "C:\path"` if files are elsewhere).
+4. Launch the dashboard — the banner now confirms real CAISO data.
+
+> **Why day-ahead (DAM) and not 5-minute real-time?** `PRC_LMP` is the
+> day-ahead report — natively hourly (matches this model), 31-day chunks, and
+> exactly what the OASIS LMP Prices page exposes. True 5-minute real-time
+> (`PRC_INTVL_LMP` / `RTM`) is capped at ~1 trade day per request (~100k
+> rows/month), impractical to pull for a full year. Switch reports via the
+> `CAISO_*` settings in `config.py` if you do want real-time.
 
 ---
 
@@ -106,12 +136,12 @@ disp = run_dispatch(get_hourly_lmp(2023))
 A deliberately simple, fully transparent **greedy** rule-based dispatcher — no
 linear/mixed-integer programming. Each hour:
 
-1. **Price signal.** Compute the trailing **30-day rolling 25th and 75th
+1. **Price signal.** Compute the trailing **30-day rolling 35th and 65th
    percentile** of LMP (causal — no look-ahead).
-2. **Charge** when `LMP ≤ 25th percentile`, up to the lesser of the power
+2. **Charge** when `LMP ≤ 35th percentile`, up to the lesser of the power
    rating and the headroom to the 95% ceiling. Stored energy = grid energy ×
    RTE (the round-trip loss is booked entirely on the charge side).
-3. **Discharge** when `LMP ≥ 75th percentile`, up to the lesser of the power
+3. **Discharge** when `LMP ≥ 65th percentile`, up to the lesser of the power
    rating and the energy available above the 10% floor. Discharge is loss-free.
 4. **Otherwise idle.**
 5. **Resource Adequacy.** During hours-ending 16–21, 45 MW of power is reserved
@@ -133,7 +163,7 @@ table relative to a true optimization:
 |---|---|---|
 | Foresight | None — reacts to a trailing percentile signal | Perfect (or forecast) foresight over a horizon |
 | Cycle timing | May charge/discharge sub-optimally near thresholds | Globally optimal charge/discharge scheduling |
-| Threshold choice | Fixed 25th/75th percentiles | Endogenous — dispatches whenever marginal spread > marginal cost |
+| Threshold choice | Fixed 35th/65th percentiles | Endogenous — dispatches whenever marginal spread > marginal cost |
 | Degradation cost | Not priced into the decision | Can co-optimize throughput vs. degradation |
 | Multi-service | Arbitrage only; RA handled as a hard reserve | Can co-optimize energy + AS + RA capacity |
 | Typical result | **Captures wider spreads but fewer cycles** | More cycles at slightly thinner average spread, higher total $ |
@@ -173,7 +203,9 @@ logic edits required.
 
 ## Data sources & roadmap
 
-- **CAISO OASIS** `PRC_LMP` / RTM / `SP15GEN-APND` — real-time LMP.
+- **CAISO OASIS** `PRC_LMP` / DAM / `TH_SP15_GEN-APND` — day-ahead hourly LMP.
+  (True 5-minute real-time is `PRC_INTVL_LMP` / RTM — configurable, but capped
+  at ~1 day per request, so impractical to download for a full year.)
 - **Solar** is currently synthetic (sinusoidal clear-sky + seasonal envelope +
   daily cloud variability, scaled to 27% CF, 4% curtailment). The
   `solar_from_nsrdb()` stub in `solar_gen.py` marks the drop-in point for real

@@ -26,7 +26,8 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # --------------------------------------------------------------------------- #
 # Analysis horizon
 # --------------------------------------------------------------------------- #
-DATA_YEAR = 2023          # Calendar year of CAISO LMP data to analyze
+DATA_YEAR = 2025          # Calendar year of CAISO LMP data to analyze
+                          # (most recent COMPLETE year; OASIS serves it in full)
 PROJECT_YEAR = 1          # Project year to model (degradation reference)
 
 # --------------------------------------------------------------------------- #
@@ -61,22 +62,36 @@ RA_PEAK_HOURS = (16, 17, 18, 19, 20, 21)  # ... during these hours-ending (HE16-
 # Greedy dispatch signal
 # --------------------------------------------------------------------------- #
 ROLLING_WINDOW_DAYS = 30      # Trailing window for percentile price signal
-CHARGE_PERCENTILE = 25        # Charge when LMP <= rolling 25th percentile
-DISCHARGE_PERCENTILE = 75     # Discharge when LMP >= rolling 75th percentile
+CHARGE_PERCENTILE = 35        # Charge when LMP <= rolling 35th percentile
+DISCHARGE_PERCENTILE = 65     # Discharge when LMP >= rolling 65th percentile
 
 # --------------------------------------------------------------------------- #
 # CAISO OASIS API
 # --------------------------------------------------------------------------- #
-CAISO_BASE_URL = "http://oasis.caiso.com/oasisapi/SingleZip"
+# NOTE on report choice: PRC_LMP serves the *Day-Ahead Market* (DAM), which is
+# natively hourly, allows 31-day request chunks, and is what the OASIS website's
+# LMP Prices page exposes. This is the practical, default basis for the model.
+#
+# True real-time 5-minute LMP is a *different* report, PRC_INTVL_LMP with
+# market_run_id=RTM. It is intentionally NOT the default: OASIS caps 5-minute
+# queries at ~1 trade day per request (~100k rows/month), which is impractical
+# to download manually for a full year. To use it anyway, set:
+#     CAISO_QUERYNAME    = "PRC_INTVL_LMP"
+#     CAISO_MARKET_RUN_ID = "RTM"
+#     CAISO_VERSION       = 3
+#     CAISO_CHUNK_DAYS    = 1
+CAISO_BASE_URL = "https://oasis.caiso.com/oasisapi/SingleZip"
 CAISO_QUERYNAME = "PRC_LMP"
-CAISO_MARKET_RUN_ID = "RTM"      # Real-time market
-CAISO_NODE = "SP15GEN-APND"      # SP15 generation aggregate node
-CAISO_VERSION = 1
+CAISO_MARKET_RUN_ID = "DAM"          # Day-ahead market (hourly LMP)
+CAISO_NODE = "TH_SP15_GEN-APND"      # SP15 generation trading hub APnode
+CAISO_VERSION = 1                    # confirmed working via diagnostic sweep
 CAISO_RESULTFORMAT = 6           # 6 = CSV (zipped)
-CAISO_CHUNK_DAYS = 31            # Max date span per OASIS request
+CAISO_CHUNK_DAYS = 30            # Date span per request; OASIS caps PRC_LMP at
+                                 # 31 days, so 30 stays safely under the boundary
 CAISO_MAX_RETRIES = 4
 CAISO_BACKOFF_BASE_SEC = 5       # Exponential backoff base (OASIS rate-limits hard)
 CAISO_REQUEST_TIMEOUT = 60       # Seconds
+CAISO_INTER_REQUEST_DELAY = 7    # Seconds between live chunk requests (AUP: >=5s)
 
 # If the OASIS API is unreachable (firewall, 403 throttle, offline), the fetcher
 # falls back to a deterministic synthetic SP15 price series so the rest of the
