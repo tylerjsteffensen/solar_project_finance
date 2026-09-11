@@ -31,22 +31,23 @@ The model covers the full analytical stack a developer analyst would use to eval
 | Metric | Value | Benchmark |
 |---|---|---|
 | **Project IRR** | **7.75%** | Above 7.0% debt cost — leverage accretive |
-| **Equity IRR** | **9.52%** | 2.5% gap to 12% target |
+| **Equity IRR** | **12.87%** | Clears the 12.0% target |
 | Project NPV (at 7%) | +$8.2M | Positive |
-| Equity Multiple | 3.33x | — |
-| Equity Payback | 11 years | — |
+| Equity NPV (at 12%) | +$2.1M | Positive at target IRR |
+| Equity Multiple | 5.06x | — |
+| Equity Payback | 9 years | — |
 | Min DSCR | 1.30x | Covenant floor: 1.30x |
-| Avg DSCR | 1.44x | — |
+| Avg DSCR | 1.32x | — |
 | System LCOE | $69.84/MWh | Lazard range: $50–$131 ✓ |
-| Min Viable PPA Price | $55.42/MWh | LBNL market: $40–$65 ✓ |
+| Min Viable PPA Price | $49.02/MWh | Below $50 PPA; LBNL market: $40–$65 ✓ |
 
 **Capital Stack**
 
 | Source | Amount | % |
 |---|---|---|
-| Senior Debt | $82.4M | 47.9% |
+| Senior Debt | $99.1M | 57.6% |
 | ITC Cash Proceeds | $45.5M | 26.5% |
-| Equity Contribution | $44.1M | 25.6% |
+| Equity Contribution | $27.5M | 16.0% |
 | **Total Project Cost** | **$172.1M** | **100%** |
 
 ---
@@ -89,9 +90,9 @@ BESS arbitrage uses an explicit RTE adjustment factor (1 ÷ 85% = 1.176) to corr
 
 ## Key Design Decisions
 
-**DSCR-constrained debt sizing.** Debt is sized via Goal Seek to a 1.30x minimum DSCR floor rather than a fixed leverage ratio, with a 65% leverage cap as a secondary hard constraint. Final debt of $82.4M (47.9%) reflects the DSCR floor binding.
+**DSCR-constrained debt sizing.** Debt is sized via Goal Seek to a 1.30x minimum DSCR floor rather than a fixed leverage ratio, with a 65% leverage cap as a secondary hard constraint. Final debt of $99.1M (57.6%) reflects the DSCR floor binding (leverage stays under the 65% cap).
 
-**ITC over PTC despite PTC's higher NPV.** TAX tab Block 4 shows PTC is NPV-optimal (+$5M total economic value). ITC is elected because PTC credits arrive over 10 years rather than at close, which doubles required equity from $44M to $90M and reduces Equity IRR from 9.52% to 3.69%. ITC is preferred for equity return optimization under the IRA Section 6418 transferability framework.
+**ITC over PTC.** TAX tab Block 4 shows ITC is the optimal election — worth +$40.5M more in total economic value than PTC ($69.9M vs $29.4M). Because PTC credits accrue over 10 years rather than arriving at close, electing PTC would require roughly $45.5M of additional equity up front (raising the equity check from $27.5M to about $73M) and sharply depress the Equity IRR. ITC is monetized via direct transfer at 92.5¢/$ under the IRA Section 6418 transferability framework.
 
 **Decomposed O&M structure.** Rather than a single all-in O&M rate, operating costs are modeled as separate line items (maintenance, insurance, land, asset management, CAISO fees) for auditability and independent sensitivity testing.
 
@@ -132,7 +133,7 @@ Full source citations on every assumption — see INPUTS tab.
 
 **Scenario analysis** (4 scenarios): Bear, Base, Bull, and 12% Target — with full input assumption sets and output metrics for each.
 
-The base case generates 9.52% Equity IRR against a 12% target. The minimum viable PPA price to reach 12% is $55.42/MWh — within the LBNL reported market range of $40–$65/MWh and achievable for a storage-paired project in California.
+The base case generates a 12.87% Equity IRR, clearing the 12% target. The minimum viable PPA price to still hit 12% is $49.02/MWh — below the current $50/MWh PPA and within the LBNL reported market range of $40–$65/MWh, comfortable for a storage-paired project in California.
 
 ---
 
